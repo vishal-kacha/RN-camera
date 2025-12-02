@@ -224,7 +224,6 @@ class TelemetryCollector {
             report.appendLine("  Average: ${String.format("%.2f", gpuValues.average())}%")
             report.appendLine("  Min: ${String.format("%.2f", gpuValues.minOrNull() ?: 0.0)}%")
             report.appendLine("  Max: ${String.format("%.2f", gpuValues.maxOrNull() ?: 0.0)}%")
-            report.appendLine("  Note: GPU metrics are approximate on Android without root access")
             report.appendLine()
         }
 
@@ -235,7 +234,6 @@ class TelemetryCollector {
                 report.appendLine("  Average: ${recordingLatencies.average().toLong()} ms")
                 report.appendLine("  Min: ${recordingLatencies.minOrNull() ?: 0} ms")
                 report.appendLine("  Max: ${recordingLatencies.maxOrNull() ?: 0} ms")
-                report.appendLine("  Samples: ${recordingLatencies.size}")
                 report.appendLine()
             }
         }
@@ -271,14 +269,6 @@ class TelemetryCollector {
                 report.appendLine("  ✓ System resources are well-balanced")
             }
         }
-
-        report.appendLine()
-        report.appendLine("IMPROVEMENT RECOMMENDATIONS:")
-        report.appendLine("  1. Use MediaCodec surface input for zero-copy encoding")
-        report.appendLine("  2. Tune bitrate based on resolution (4-8 Mbps for 1080p)")
-        report.appendLine("  3. Implement adaptive quality based on device capabilities")
-        report.appendLine("  4. Consider using lower resolution (720p) for circular buffer")
-        report.appendLine("  5. Profile frame allocation and minimize object creation")
 
         return report.toString()
     }

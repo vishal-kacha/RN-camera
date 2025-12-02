@@ -7,7 +7,9 @@ import android.media.MediaCodecInfo
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.os.Build
+import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.widget.FrameLayout
 import androidx.camera.core.CameraSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
@@ -18,7 +20,10 @@ import androidx.lifecycle.LifecycleOwner
 import com.facebook.react.bridge.ReactContext
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import java.io.File
+import java.io.FileWriter
 import java.nio.ByteBuffer
+import java.text.SimpleDateFormat
+import java.util.*
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 
@@ -55,6 +60,7 @@ class CameraXView(context: Context) : FrameLayout(context) {
 
     // Telemetry
     private val telemetryCollector = TelemetryCollector()
+    private val TAG = "CameraXView"
 
     init {
         if (context is ReactContext) {
@@ -137,6 +143,8 @@ class CameraXView(context: Context) : FrameLayout(context) {
                                         "onRecordingStopped",
                                         event.outputResults.outputUri.toString()
                                 )
+                                // Save telemetry report after recording
+                                saveTelemetryReport("standard")
                             }
                             activeRecording = null
                         }
@@ -178,6 +186,9 @@ class CameraXView(context: Context) : FrameLayout(context) {
                 val latency = System.currentTimeMillis() - startTime
                 telemetryCollector.recordRecordingLatency(latency)
                 sendEvent("onRecordingStarted", null)
+
+                // Save telemetry report after circular buffer recording
+                saveTelemetryReport("circular")
             } catch (e: Exception) {
                 sendEvent("onError", e.message)
                 isCircularBufferRecording = false
@@ -298,6 +309,36 @@ class CameraXView(context: Context) : FrameLayout(context) {
             }
             file.delete()
             sendEvent("onRecordingStopped", targetUri.toString())
+        }
+    }
+
+    private fun saveTelemetryReport(recordingType: String) {
+        try {
+            val report = telemetryCollector.generateReport()
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val filename = "telemetry_${recordingType}_${timestamp}.txt"
+
+            // Save to app-specific directory (doesn't require special permissions)
+            val telemetryDir =
+                    File(context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS), "Telemetry")
+            if (!telemetryDir.exists()) {
+                telemetryDir.mkdirs()
+            }
+
+            val telemetryFile = File(telemetryDir, filename)
+            FileWriter(telemetryFile).use { writer ->
+                writer.write("Recording Type: ${recordingType.uppercase()}\n")
+                writer.write(
+                        "Timestamp: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(Date())}\n"
+                )
+                writer.write("=====================================\n\n")
+                writer.write(report)
+            }
+
+            Log.d(TAG, "Telemetry report saved to: ${telemetryFile.absolutePath}")
+            sendEvent("onTelemetrySaved", telemetryFile.absolutePath)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to save telemetry report", e)
         }
     }
 

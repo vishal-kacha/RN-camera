@@ -4,12 +4,11 @@ import {
   StyleSheet,
   useColorScheme,
   View,
-  PermissionsAndroid,
-  Platform,
   Text,
-  TouchableOpacity,
-  ScrollView,
+  Pressable,
   Alert,
+  Modal,
+  TextInput,
 } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
@@ -17,6 +16,7 @@ import {
   CameraXModule,
   addListeners as addCameraXListeners,
 } from './CameraXView';
+import PermissionsComponent from './Permission';
 
 type RecordingMode = 'standard' | 'circular';
 
@@ -25,6 +25,7 @@ function App() {
   return (
     <SafeAreaProvider>
       <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
+      <PermissionsComponent />
       <AppContent />
     </SafeAreaProvider>
   );
@@ -34,22 +35,16 @@ function AppContent() {
   const [recording, setRecording] = useState(false);
   const [savedUri, setSavedUri] = useState<string | null>(null);
   const [recordingMode, setRecordingMode] = useState<RecordingMode>('standard');
-  const [preBufferDuration, setPreBufferDuration] = useState(5000); // 5 seconds
-  const [postBufferDuration, setPostBufferDuration] = useState(5000); // 5 seconds
-  const [telemetryReport, setTelemetryReport] = useState<string>('');
-  const [showTelemetry, setShowTelemetry] = useState(false);
-  const [permissionsStatus, setPermissionsStatus] = useState<{
-    [key: string]: string;
-  }>({});
+  const [bufferDuration, setBufferDuration] = useState(5000); // 5 seconds
+  const [showBufferMenu, setShowBufferMenu] = useState(false);
+  const [showModeMenu, setShowModeMenu] = useState(false);
+  const [showCustomModal, setShowCustomModal] = useState(false);
+  const [customValue, setCustomValue] = useState('');
 
-  // Ask for Android permissions
+  const predefinedDurations = [3000, 5000, 10000];
+
+  // Setup CameraX listeners
   useEffect(() => {
-    if (Platform.OS === 'android') {
-      requestPermissions();
-      // Check permissions status after requesting
-      checkPermissionsStatus();
-    }
-
     addCameraXListeners({
       onRecordingStarted: () => {
         console.log('Recording started');
@@ -69,76 +64,6 @@ function AppContent() {
     });
   }, []);
 
-  const requestPermissions = async () => {
-    try {
-      const androidVersion = Platform.Version;
-      const permissions = [
-        PermissionsAndroid.PERMISSIONS.CAMERA,
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-      ];
-
-      // Only request storage permissions on Android 9 and below
-      // Android 10+ uses Scoped Storage (no permission needed for MediaStore)
-      if (androidVersion <= 28) {
-        permissions.push(PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE);
-        permissions.push(PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE);
-      }
-
-      const granted = await PermissionsAndroid.requestMultiple(permissions);
-
-      const allGranted = Object.values(granted).every(
-        status => status === PermissionsAndroid.RESULTS.GRANTED,
-      );
-
-      if (!allGranted) {
-        Alert.alert(
-          'Permissions Required',
-          'Camera and audio permissions are required to record videos.',
-          [{ text: 'OK' }],
-        );
-      } else {
-        console.log('All permissions granted');
-      }
-    } catch (err) {
-      console.warn('Permission request error:', err);
-      Alert.alert('Error', 'Failed to request permissions');
-    }
-  };
-
-  const checkPermissionsStatus = async () => {
-    try {
-      const androidVersion = Platform.Version;
-      const status: { [key: string]: string } = {};
-
-      status.camera = (await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.CAMERA,
-      ))
-        ? 'granted'
-        : 'denied';
-
-      status.audio = (await PermissionsAndroid.check(
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-      ))
-        ? 'granted'
-        : 'denied';
-
-      if (androidVersion <= 28) {
-        status.storage = (await PermissionsAndroid.check(
-          PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
-        ))
-          ? 'granted'
-          : 'denied';
-      } else {
-        status.storage = 'not required (Android 10+)';
-      }
-
-      setPermissionsStatus(status);
-      console.log('Permissions Status:', status);
-    } catch (err) {
-      console.warn('Error checking permissions:', err);
-    }
-  };
-
   const handleStartRecording = () => {
     if (recordingMode === 'standard') {
       CameraXModule.startRecording();
@@ -155,164 +80,128 @@ function AppContent() {
     }
   };
 
-  const updatePreBuffer = (duration: number) => {
-    setPreBufferDuration(duration);
+  const updateBufferDuration = (duration: number) => {
+    setBufferDuration(duration);
     CameraXModule.setPreBufferDuration(duration);
-  };
-
-  const updatePostBuffer = (duration: number) => {
-    setPostBufferDuration(duration);
     CameraXModule.setPostBufferDuration(duration);
+    setShowBufferMenu(false);
   };
 
-  const fetchTelemetryReport = async () => {
-    try {
-      const report = await CameraXModule.getTelemetryReport();
-      setTelemetryReport(report);
-      setShowTelemetry(true);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to fetch telemetry report');
+  const handleCustomDuration = () => {
+    const val = parseInt(customValue);
+    if (val > 0) {
+      const durationMs = val * 1000;
+      updateBufferDuration(durationMs);
     }
+    setShowCustomModal(false);
+    setCustomValue('');
   };
 
   return (
     <View style={styles.container}>
       {/* Native Camera Preview */}
-      <CameraXView style={styles.preview} />
+      <CameraXView style={styles.cameraPreview} />
 
-      {/* Controls Overlay */}
-      <View style={styles.controls}>
-        {/* Recording Mode Toggle */}
-        <View style={styles.modeSelector}>
-          <Text style={styles.label}>Recording Mode:</Text>
-          <View style={styles.modeButtons}>
-            <TouchableOpacity
-              style={[
-                styles.modeButton,
-                recordingMode === 'standard' && styles.modeButtonActive,
-              ]}
-              onPress={() => setRecordingMode('standard')}
-              disabled={recording}
-            >
-              <Text
-                style={[
-                  styles.modeButtonText,
-                  recordingMode === 'standard' && styles.modeButtonTextActive,
-                ]}
+      {/* Bottom Container */}
+      <View style={styles.bottomContainer}>
+        {/* Recording Mode Dropdown - Left */}
+        <View style={styles.leftDropdown}>
+          <Pressable
+            style={styles.dropdownButton}
+            onPress={() => !recording && setShowModeMenu(!showModeMenu)}
+            disabled={recording}
+          >
+            <Text style={styles.dropdownButtonText}>
+              {recordingMode === 'standard' ? 'Standard' : 'Circular'} ▼
+            </Text>
+          </Pressable>
+          {showModeMenu && (
+            <View style={styles.dropdownMenu}>
+              <Pressable
+                style={styles.dropdownItem}
+                onPress={() => {
+                  setRecordingMode('standard');
+                  setShowModeMenu(false);
+                }}
               >
-                Standard
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.modeButton,
-                recordingMode === 'circular' && styles.modeButtonActive,
-              ]}
-              onPress={() => setRecordingMode('circular')}
-              disabled={recording}
-            >
-              <Text
-                style={[
-                  styles.modeButtonText,
-                  recordingMode === 'circular' && styles.modeButtonTextActive,
-                ]}
+                <Text style={styles.dropdownItemText}>Standard</Text>
+              </Pressable>
+              <Pressable
+                style={styles.dropdownItem}
+                onPress={() => {
+                  setRecordingMode('circular');
+                  setShowModeMenu(false);
+                }}
               >
-                Circular Buffer
-              </Text>
-            </TouchableOpacity>
-          </View>
+                <Text style={styles.dropdownItemText}>Circular</Text>
+              </Pressable>
+            </View>
+          )}
         </View>
 
-        {/* Circular Buffer Settings */}
+        {/* Buffer Duration Dropdown - Below Mode Selector (only for circular) */}
         {recordingMode === 'circular' && (
-          <View style={styles.bufferSettings}>
-            <View style={styles.bufferRow}>
-              <Text style={styles.label}>Pre-Record:</Text>
-              <View style={styles.durationButtons}>
-                {[3000, 5000, 10000].map(duration => (
-                  <TouchableOpacity
-                    key={`pre-${duration}`}
-                    style={[
-                      styles.durationButton,
-                      preBufferDuration === duration &&
-                        styles.durationButtonActive,
-                    ]}
-                    onPress={() => updatePreBuffer(duration)}
-                    disabled={recording}
+          <View style={styles.bufferContainer}>
+            <Pressable
+              style={styles.dropdownButton}
+              onPress={() => !recording && setShowBufferMenu(!showBufferMenu)}
+              disabled={recording}
+            >
+              <Text style={styles.dropdownButtonText}>
+                {bufferDuration / 1000}s ▼
+              </Text>
+            </Pressable>
+            {showBufferMenu && (
+              <View style={styles.bufferMenu}>
+                {predefinedDurations.map(duration => (
+                  <Pressable
+                    key={`buffer-${duration}`}
+                    style={styles.dropdownItem}
+                    onPress={() => updateBufferDuration(duration)}
                   >
-                    <Text style={styles.durationText}>{duration / 1000}s</Text>
-                  </TouchableOpacity>
+                    <Text style={styles.dropdownItemText}>
+                      {duration / 1000}s
+                    </Text>
+                  </Pressable>
                 ))}
+                <Pressable
+                  style={[
+                    styles.dropdownItem,
+                    { borderTopWidth: 1, borderTopColor: '#555' },
+                  ]}
+                  onPress={() => {
+                    setShowBufferMenu(false);
+                    setShowCustomModal(true);
+                  }}
+                >
+                  <Text style={styles.dropdownItemText}>Custom…</Text>
+                </Pressable>
               </View>
-            </View>
-
-            <View style={styles.bufferRow}>
-              <Text style={styles.label}>Post-Record:</Text>
-              <View style={styles.durationButtons}>
-                {[3000, 5000, 10000].map(duration => (
-                  <TouchableOpacity
-                    key={`post-${duration}`}
-                    style={[
-                      styles.durationButton,
-                      postBufferDuration === duration &&
-                        styles.durationButtonActive,
-                    ]}
-                    onPress={() => updatePostBuffer(duration)}
-                    disabled={recording}
-                  >
-                    <Text style={styles.durationText}>{duration / 1000}s</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </View>
+            )}
           </View>
         )}
 
-        {/* Record Button */}
-        <TouchableOpacity
-          style={[styles.recordButton, recording && styles.recordButtonActive]}
+        {/* Camera Button - Centered */}
+        <Pressable
+          style={({ pressed }) => [
+            styles.cameraButton,
+            recording && styles.cameraButtonRecording,
+            pressed && { opacity: 0.7 },
+          ]}
           onPress={recording ? handleStopRecording : handleStartRecording}
+          android_ripple={{ color: '#ccc', borderless: false }}
         >
-          <Text style={styles.recordButtonText}>
-            {recording ? '⏹ Stop' : '⏺ Record'}
-          </Text>
-        </TouchableOpacity>
-
-        {/* Telemetry Button */}
-        <TouchableOpacity
-          style={styles.telemetryButton}
-          onPress={fetchTelemetryReport}
-        >
-          <Text style={styles.telemetryButtonText}>📊 View Telemetry</Text>
-        </TouchableOpacity>
-
-        {/* Debug: Show Permissions Status */}
-        {/*{Object.keys(permissionsStatus).length > 0 && (
-          <View style={styles.permissionsDebug}>
-            <Text style={styles.debugTitle}>Permissions Status:</Text>
-            {Object.entries(permissionsStatus).map(([key, value]) => (
-              <Text key={key} style={styles.debugText}>
-                {key}:{' '}
-                {value === 'granted'
-                  ? '✓'
-                  : value === 'not required (Android 10+)'
-                  ? '✓'
-                  : '✗'}{' '}
-                {value}
-              </Text>
-            ))}
-            <TouchableOpacity
-              style={styles.recheckButton}
-              onPress={checkPermissionsStatus}
-            >
-              <Text style={styles.recheckButtonText}>🔄 Recheck</Text>
-            </TouchableOpacity>
-          </View>
-        )}*/}
+          <View
+            style={[
+              styles.innerCircle,
+              recording && styles.innerCircleRecording,
+            ]}
+          />
+        </Pressable>
 
         {/* Status Message */}
         {savedUri && (
-          <Text style={styles.message}>✓ Video saved to gallery</Text>
+          <Text style={styles.statusMessage}>✓ Video saved to gallery</Text>
         )}
         {recording && (
           <Text style={styles.recordingIndicator}>
@@ -322,22 +211,28 @@ function AppContent() {
         )}
       </View>
 
-      {/* Telemetry Report Modal */}
-      {showTelemetry && (
-        <View style={styles.telemetryOverlay}>
-          <View style={styles.telemetryModal}>
-            <View style={styles.telemetryHeader}>
-              <Text style={styles.telemetryTitle}>Performance Report</Text>
-              <TouchableOpacity onPress={() => setShowTelemetry(false)}>
-                <Text style={styles.closeButton}>✕</Text>
-              </TouchableOpacity>
-            </View>
-            <ScrollView style={styles.telemetryContent}>
-              <Text style={styles.telemetryText}>{telemetryReport}</Text>
-            </ScrollView>
+      {/* Custom Input Modal */}
+      <Modal transparent visible={showCustomModal} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Enter seconds</Text>
+            <TextInput
+              value={customValue}
+              onChangeText={setCustomValue}
+              keyboardType="numeric"
+              style={styles.customInput}
+              placeholder="e.g. 7"
+              placeholderTextColor="#aaa"
+            />
+            <Pressable
+              style={styles.modalButton}
+              onPress={handleCustomDuration}
+            >
+              <Text style={styles.modalButtonText}>OK</Text>
+            </Pressable>
           </View>
         </View>
-      )}
+      </Modal>
     </View>
   );
 }
@@ -347,197 +242,136 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  preview: {
+  cameraPreview: {
     flex: 1,
-    backgroundColor: 'black',
+    backgroundColor: '#222',
   },
-  controls: {
-    padding: 16,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+  bottomContainer: {
+    alignItems: 'center',
+    padding: 20,
+    position: 'relative',
   },
-  modeSelector: {
-    marginBottom: 16,
+  leftDropdown: {
+    position: 'absolute',
+    left: 20,
+    top: 35,
+    zIndex: 10,
   },
-  label: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  modeButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  modeButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  dropdownButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#333',
   },
-  modeButtonActive: {
-    backgroundColor: '#007AFF',
-    borderColor: '#007AFF',
+  dropdownButtonText: {
+    color: '#fff',
+    fontSize: 16,
   },
-  modeButtonText: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  modeButtonTextActive: {
-    color: 'white',
-  },
-  bufferSettings: {
-    marginBottom: 16,
-    padding: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  dropdownMenu: {
+    position: 'absolute',
+    bottom: 45,
+    left: 0,
+    backgroundColor: '#333',
+    paddingVertical: 5,
     borderRadius: 8,
+    width: 120,
+    zIndex: 100,
   },
-  bufferRow: {
-    marginBottom: 12,
-  },
-  durationButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  durationButton: {
-    flex: 1,
+  dropdownItem: {
     paddingVertical: 8,
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
-  durationButtonActive: {
-    backgroundColor: '#34C759',
-    borderColor: '#34C759',
+  dropdownItemText: {
+    color: '#fff',
+    fontSize: 16,
   },
-  durationText: {
-    color: 'white',
-    fontSize: 13,
-    fontWeight: '500',
-    textAlign: 'center',
+  bufferContainer: {
+    position: 'absolute',
+    left: 20,
+    top: 85,
+    zIndex: 10,
   },
-  recordButton: {
-    paddingVertical: 16,
-    backgroundColor: '#FF3B30',
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  recordButtonActive: {
-    backgroundColor: '#FF9500',
-  },
-  recordButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  telemetryButton: {
-    paddingVertical: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  bufferMenu: {
+    position: 'absolute',
+    bottom: 45,
+    left: 0,
+    backgroundColor: '#333',
+    paddingVertical: 5,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    width: 100,
+    zIndex: 100,
   },
-  telemetryButtonText: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
+  cameraButton: {
+    height: 80,
+    width: 80,
+    borderRadius: 40,
+    backgroundColor: '#fff',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  message: {
+  cameraButtonRecording: {
+    backgroundColor: '#FF3B30',
+  },
+  innerCircle: {
+    height: 70,
+    width: 70,
+    borderRadius: 35,
+    backgroundColor: '#fff',
+  },
+  innerCircleRecording: {
+    width: 30,
+    height: 30,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+  },
+  statusMessage: {
     color: '#34C759',
-    padding: 12,
     fontSize: 14,
     fontWeight: '600',
-    textAlign: 'center',
+    marginTop: 10,
   },
   recordingIndicator: {
     color: '#FF3B30',
-    padding: 12,
     fontSize: 14,
     fontWeight: '700',
+    marginTop: 10,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    width: 200,
+    backgroundColor: '#222',
+    padding: 20,
+    borderRadius: 10,
+    alignItems: 'center',
+  },
+  modalTitle: {
+    color: '#fff',
+    marginBottom: 10,
+    fontSize: 16,
+  },
+  customInput: {
+    width: 150,
+    padding: 8,
+    borderWidth: 1,
+    borderColor: '#555',
+    borderRadius: 8,
+    color: '#fff',
+    marginBottom: 15,
     textAlign: 'center',
   },
-  telemetryOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.9)',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  telemetryModal: {
-    backgroundColor: '#1C1C1E',
-    borderRadius: 16,
-    maxHeight: '80%',
-    overflow: 'hidden',
-  },
-  telemetryHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  telemetryTitle: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  closeButton: {
-    color: 'white',
-    fontSize: 24,
-    fontWeight: '300',
-  },
-  telemetryContent: {
-    padding: 16,
-  },
-  telemetryText: {
-    color: 'white',
-    fontSize: 12,
-    fontFamily: 'monospace',
-    lineHeight: 18,
-  },
-  permissionsDebug: {
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  modalButton: {
+    backgroundColor: '#444',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
     borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  debugTitle: {
-    color: 'white',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 8,
-  },
-  debugText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 12,
-    marginBottom: 4,
-  },
-  recheckButton: {
-    marginTop: 8,
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-  },
-  recheckButtonText: {
-    color: 'white',
-    fontSize: 12,
-    fontWeight: '600',
+  modalButtonText: {
+    color: '#fff',
   },
 });
 
